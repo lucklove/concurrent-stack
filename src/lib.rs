@@ -109,6 +109,8 @@ fn release<T>(top: &AtomicStampedPtr<Node<T>>) {
 #[cfg(test)]
 mod tests {
     use super::ConcurrentStack;
+    use std::sync::Arc;
+    use std::thread;
 
     #[test]
     fn lock_free_stack_single_thread() {
@@ -121,6 +123,43 @@ mod tests {
         stack.push(4);
         assert_eq!(stack.pop(), Some(4));
         assert_eq!(stack.pop(), Some(1));
+    }
+
+    #[test]
+    fn multi_thread_sum() {
+        let stack = Arc::new(ConcurrentStack::new());
+
+        let input_p = (0..10).map(|_| {
+            let stack = stack.clone();
+            thread::spawn(move || {
+                for i in 0..100 {
+                    stack.push(i);
+                }
+            })
+        }).collect::<Vec<_>>();
+
+
+        let mut sum = 0;
+         
+        let output_p = {
+            let stack = stack.clone();
+            thread::spawn(move || {
+                loop {
+                    if let Some(i) = stack.pop() {
+                        sum += i;
+                    } else if sum == 49500 {
+                        break;
+                    }
+                }
+            })
+        };
+
+        for t in input_p {
+            t.join().unwrap();
+        }
+        output_p.join().unwrap();
+
+        assert!(stack.empty());
     }
 
     #[test]
