@@ -2,6 +2,11 @@
 name = "concurrent-stack"
 version = "0.1.0"
 authors = ["Jos <gnu.crazier@gmail.com>"]
+description = "Lock free stack"
+documentation = "https://github.com/lucklove/concurrent-stack"
+homepage = "https://github.com/lucklove/concurrent-stack"
+repository = "https://github.com/lucklove/concurrent-stack"
+license = "MIT"
 
 [dependencies]
-atomic-stamped-ptr = "*"
+atomic-stamped-ptr = "0.1.1"

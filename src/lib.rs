@@ -1,7 +1,38 @@
+//! Lock free stack for x86_64.
+//! Providing basic thread safe stack operations.
+//!
+//! # Examples
+//!
+//! ```
+//! use concurrent_stack::ConcurrentStack;
+//! use std::sync::Arc;
+//! use std::thread;
+//!
+//!
+//! let stack = Arc::new(ConcurrentStack::new());
+//! let pusher = stack.clone();
+//! let producer = thread::spawn(move || {
+//!     for i in 0..100 {
+//!         pusher.push(i);
+//!     }
+//! });
+//! let poper = stack.clone();
+//! let consumer = thread::spawn(move || {
+//!     for _ in 0..100 {
+//!         if let Some(v) = poper.pop() {
+//!             // Deal with v.
+//!         }
+//!     }   
+//! });
+//! producer.join();
+//! consumer.join();
+//! ```
+
 extern crate atomic_stamped_ptr;
 
 use atomic_stamped_ptr::AtomicStampedPtr;
 
+/// A lock free FILO structure.
 pub struct ConcurrentStack<T> {
     top: AtomicStampedPtr<Node<T>>,
     trash: AtomicStampedPtr<Node<T>>,
@@ -42,10 +73,12 @@ impl<T> ConcurrentStack<T> {
         }
     }
 
+    /// Push a value on the top of stack.
     pub fn push(&self, raw: T) {
         self.do_push(raw);
     }
 
+    /// Pop a value from the top of stack, if no available， return None.
     pub fn pop(&self) -> Option<T> {
         let node = pop_top(&self.top);
         if node.is_null() {
@@ -58,6 +91,7 @@ impl<T> ConcurrentStack<T> {
         }
     }
 
+    /// Check if stack is empty.
     pub fn empty(&self) -> bool {
         self.top.load().0.is_null()
     }
