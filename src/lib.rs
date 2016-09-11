@@ -22,7 +22,7 @@
 //!         if let Some(v) = poper.pop() {
 //!             // Deal with v.
 //!         }
-//!     }   
+//!     }
 //! });
 //! producer.join();
 //! consumer.join();
@@ -44,12 +44,55 @@ struct Node<T> {
 }
 
 impl<T> ConcurrentStack<T> {
+    pub fn new() -> Self {
+        ConcurrentStack {
+            top: AtomicStampedPtr::default(),
+            trash: AtomicStampedPtr::default(),
+        }
+    }
+
+    fn push_top(top: &AtomicStampedPtr<Node<T>>, node: *mut Node<T>) {
+        loop {
+            let (p, v) = top.load();
+            unsafe {
+                (*node).next = p;
+            }
+            if let Ok(_) = top.compare_exchange((p, v), node) {
+                break;
+            }
+        }
+    }
+
+    fn pop_top(top: &AtomicStampedPtr<Node<T>>) -> *mut Node<T> {
+        loop {
+            let (p, v) = top.load();
+            if p.is_null() {
+                return p;
+            }
+            let n = unsafe { (*p).next };
+            if let Ok(_) = top.compare_exchange((p, v), n) {
+                return p;
+            }
+        }
+    }
+
+    fn release(top: &AtomicStampedPtr<Node<T>>) {
+        let (mut p, _) = top.load();
+        while !p.is_null() {
+            let d = p;
+            unsafe {
+                p = (*p).next;
+                drop(Box::from_raw(d));
+            }
+        }
+    }
+
     fn put_trash(&self, node: *mut Node<T>) {
-        push_top(&self.trash, node);
+        Self::push_top(&self.trash, node);
     }
 
     fn pick_trash(&self) -> *mut Node<T> {
-        pop_top(&self.trash)
+        Self::pop_top(&self.trash)
     }
 
     fn do_push(&self, raw: T) {
@@ -63,14 +106,7 @@ impl<T> ConcurrentStack<T> {
         unsafe {
             (*node).data = Some(raw);
         }
-        push_top(&self.top, node);
-    }
-
-    pub fn new() -> Self {
-        ConcurrentStack {
-            top: AtomicStampedPtr::default(),
-            trash: AtomicStampedPtr::default(),
-        }
+        Self::push_top(&self.top, node);
     }
 
     /// Push a value on the top of stack.
@@ -80,7 +116,7 @@ impl<T> ConcurrentStack<T> {
 
     /// Pop a value from the top of stack, if no available， return None.
     pub fn pop(&self) -> Option<T> {
-        let node = pop_top(&self.top);
+        let node = Self::pop_top(&self.top);
         if node.is_null() {
             None
         } else {
@@ -99,44 +135,8 @@ impl<T> ConcurrentStack<T> {
 
 impl<T> Drop for ConcurrentStack<T> {
     fn drop(&mut self) {
-        release(&self.top);
-        release(&self.trash);
-    }
-}
-
-fn push_top<T>(top: &AtomicStampedPtr<Node<T>>, node: *mut Node<T>) {
-    loop {
-        let (p, v) = top.load();
-        unsafe {
-            (*node).next = p;
-        }
-        if let Ok(_) = top.compare_exchange((p, v), node) {
-            break;
-        }
-    }
-}
-
-fn pop_top<T>(top: &AtomicStampedPtr<Node<T>>) -> *mut Node<T> {
-    loop {
-        let (p, v) = top.load();
-        if p.is_null() {
-            return p;
-        }
-        let n = unsafe { (*p).next };
-        if let Ok(_) = top.compare_exchange((p, v), n) {
-            return p;
-        }
-    }
-}
-
-fn release<T>(top: &AtomicStampedPtr<Node<T>>) {
-    let (mut p, _) = top.load();
-    while !p.is_null() {
-        let d = p;
-        unsafe {
-            p = (*p).next;
-            drop(Box::from_raw(d));
-        }
+        Self::release(&self.top);
+        Self::release(&self.trash);
     }
 }
 
@@ -163,18 +163,20 @@ mod tests {
     fn multi_thread_sum() {
         let stack = Arc::new(ConcurrentStack::new());
 
-        let input_p = (0..10).map(|_| {
-            let stack = stack.clone();
-            thread::spawn(move || {
-                for i in 0..100 {
-                    stack.push(i);
-                }
-            })
-        }).collect::<Vec<_>>();
+        let input_p = (0..10)
+                          .map(|_| {
+                              let stack = stack.clone();
+                              thread::spawn(move || {
+                                  for i in 0..100 {
+                                      stack.push(i);
+                                  }
+                              })
+                          })
+                          .collect::<Vec<_>>();
 
 
         let mut sum = 0;
-         
+
         let output_p = {
             let stack = stack.clone();
             thread::spawn(move || {
